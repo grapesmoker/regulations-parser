@@ -507,8 +507,8 @@ def one_change(reg, label, change):
         try:
             change['node'].source_xml = etree.fromstring(
                 change['node'].source_xml)
-        except ValueError:
-            pass
+        except Exception as ex:
+            print ex
 
     if change['action'] == 'PUT' and replace_subtree:
         node = change['node']
@@ -579,7 +579,10 @@ def compile_regulation(previous_tree, notice_changes):
             if _needs_delay(reg, change):
                 next_pass.append((label, change))
             else:
-                one_change(reg, label, change)
+                try:
+                    one_change(reg, label, change)
+                except Exception as ex:
+                    print 'Encountered a problem trying to apply a change to {}: {}'.format(label, ex)
 
     # Force any remaining changes -- generally means something went wrong
     for label, change in next_pass:
