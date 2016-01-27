@@ -667,7 +667,13 @@ class XMLWriteContent:
             target = [item for item in root.label if item != 'Interp']
             target = '-'.join(target)
             label = root.label_id()
-            elem = Element('interpParagraph', label=label, target=target)
+            try:
+                marker_item = self.layers['paragraph-markers'][root.label_id()]
+                marker = marker_item[0]['text']
+            except:
+                marker = root.label[-1]
+
+            elem = Element('interpParagraph', label=label, target=target, marker=marker)
             if root.title:
                 title = SubElement(elem, 'title')
                 title.text = root.title
