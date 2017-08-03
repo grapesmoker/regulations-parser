@@ -3,6 +3,7 @@
 
 import os
 from distutils.core import setup
+from setuptools import find_packages
 
 setup(
     name='regulations-parser',
@@ -12,10 +13,10 @@ setup(
     license='CC0',
     version='0.1.0',
     description='eCFR Parser for eRegulations',
-    long_description=open('README.md').read() 
+    long_description=open('README.md').read()
             if os.path.exists('README.md') else '',
 
-    packages=['regparser', ],
+    packages=find_packages(),
     include_package_data=True,
     install_requires=[
         'lxml',

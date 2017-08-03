@@ -147,7 +147,7 @@ class XMLWriteContent:
         self.doc_number = doc_number
         self.layers = layers
         self.notices = notices
-        self.notice = next((n  for n in notices 
+        self.notice = next((n  for n in notices
                             if n['document_number'] == doc_number), None)
         self.appendix_sections = 1 # need to track these manually
         self.caps = [chr(i) for i in range(65, 65 + 26)]
@@ -169,7 +169,7 @@ class XMLWriteContent:
         dir_path = os.path.dirname(full_path)
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
-        
+
         xml_tree = self.to_xml(reg_tree)
         xml_string = tostring(xml_tree, pretty_print=True,
                 xml_declaration=True, encoding='UTF-8')
@@ -188,7 +188,7 @@ class XMLWriteContent:
         dir_path = os.path.dirname(full_path)
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
-            
+
         # Create a notice root element
         notice_string = '<notice xmlns="eregs" ' \
                      'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ' \
@@ -407,13 +407,13 @@ class XMLWriteContent:
             # footnote can't be found, we've got bigger
             # problems.
             footnote = notice['footnotes'][ref_number]
-            
+
             # Create the footnote elm with the text and ref
             # number
             footnote_elm = Element('footnote')
             footnote_elm.set('ref', ref_number)
             footnote_elm.text = footnote
-            
+
             # Add the text to the offset plus the footnote to
             # the annotated string.
             annotated_text += text[position:ref_offset] + \
@@ -443,13 +443,13 @@ class XMLWriteContent:
             # Add paragraphs
             for paragraph in child['paragraphs']:
                 paragraph_number = child['paragraphs'].index(paragraph)
-                paragraph_footnotes = [fn 
-                        for fn in child['footnote_refs'] 
+                paragraph_footnotes = [fn
+                        for fn in child['footnote_refs']
                             if fn['paragraph'] == paragraph_number]
-                text = self.resolve_footnotes(notice, paragraph, 
+                text = self.resolve_footnotes(notice, paragraph,
                                               paragraph_footnotes)
                 paragraph_elm = fromstring(
-                        '<analysisParagraph>' 
+                        '<analysisParagraph>'
                             + text +
                         '</analysisParagraph>')
 
@@ -462,20 +462,20 @@ class XMLWriteContent:
             map(lambda c:  analysis_section(notice, section_elm, c),
                     child['children'])
 
-        # NOTE: We'll let index errors percolate upwards because if 
-        # the index doesn't exist, and we can't find the notice 
-        # number or analysis within the notice, there's something 
+        # NOTE: We'll let index errors percolate upwards because if
+        # the index doesn't exist, and we can't find the notice
+        # number or analysis within the notice, there's something
         # wrong with the analyses layer to this point.
         analysis_version = analysis_ref['reference'][0]
         analysis_label = analysis_ref['reference'][1]
 
         # Look up the notice with the analysis attached
-        analysis_notice = [n for n in self.notices 
+        analysis_notice = [n for n in self.notices
                     if n['document_number'] == analysis_version][0]
 
         # Lookup the analysis for this element
-        analysis = [a 
-                for a in analysis_notice['section_by_section'] 
+        analysis = [a
+                for a in analysis_notice['section_by_section']
                     if analysis_label in a['labels']][0]
 
         # Construct the analysis element and its sections
@@ -687,7 +687,7 @@ class XMLWriteContent:
                 content = fromstring('<content>' + text + '</content>')
             except XMLSyntaxError:
                 content = fromstring('<content>MISSING CONTENT</content>')
-                    
+
             # graphics are special since they're not really inlined
             if root.label_id() in self.layers['graphics']:
                 graphics = XMLWriteContent.apply_graphics(self.layers['graphics'][root.label_id()])
@@ -736,7 +736,7 @@ class XMLWriteContent:
                 self.add_analyses(elem)
             except Exception as ex:
                 print 'Could not create analyses for {}'.format(root.label)
-                
+
         return elem
 
     def apply_layers(self, node):
