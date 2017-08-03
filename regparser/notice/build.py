@@ -33,7 +33,9 @@ def build_notice(cfr_title, cfr_part, fr_notice, do_process_xml=True):
     cfr_parts = set(str(ref['part']) for ref in fr_notice['cfr_references'])
     cfr_parts.add(cfr_part)
 
-    notice = {'cfr_title': cfr_title, 'cfr_parts': list(cfr_parts), 'cfr_part': cfr_part}
+    notice = {'cfr_title': cfr_title,
+              'cfr_parts': list(cfr_parts),
+              'cfr_part': cfr_part}
     notice_number = fr_notice['document_number']
 
     # Check for configured overrides of the FR JSON for this notice
@@ -66,7 +68,7 @@ def build_notice(cfr_title, cfr_part, fr_notice, do_process_xml=True):
         notice['meta'][key] = fr_notice[key]
 
     if fr_notice['full_text_xml_url'] and do_process_xml:
-        local_notices = check_local_version_list(
+        local_notices = _check_local_version_list(
             fr_notice['full_text_xml_url'])
 
         if len(local_notices) > 0:
@@ -129,7 +131,7 @@ def process_notice(partial_notice, notice_str):
     return notice
 
 
-def check_local_version_list(url):
+def _check_local_version_list(url):
     """Use any local copies (potentially with modifications of the FR XML)"""
     parsed_url = urlparse(url)
     path = parsed_url.path.replace('/', os.sep)
@@ -306,11 +308,11 @@ def process_amendments(notice, notice_xml):
         else:
             amdpars_by_parent.append(AmdparByParent(parent, par))
 
-    default_cfr_part = notice['cfr_parts'][0]
+    default_cfr_part = notice['cfr_part']
     for aXp in amdpars_by_parent:
         amended_labels = []
         designate_labels, other_labels = [], []
-        context = [aXp.parent.get('PART') or default_cfr_part]
+        context = [default_cfr_part]
         for par in aXp.amdpars:
             als, context = parse_amdpar(par, context)
             amended_labels.extend(als)
@@ -335,6 +337,7 @@ def process_amendments(notice, notice_xml):
             labels_for_part = {part: labels
                                for part, labels in labels_by_part.iteritems()
                                if part == default_cfr_part}
+            print(labels_for_part)
             for cfr_part, rel_labels in labels_for_part.iteritems():
                 section_xml = find_section(par)
                 if section_xml is not None:

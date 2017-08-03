@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 import argparse
 import logging
 import hashlib
@@ -44,7 +43,7 @@ def parse_regulation(args):
     builder.write_notices()
 
     #   Always do at least the first reg
-    logger.info("Version %s", builder.doc_number)
+    logger.info("Version", builder.doc_number)
     builder.write_regulation(reg_tree)
     layer_cache = LayerCacheAggregator()
 
@@ -147,10 +146,11 @@ def generate_xml(filename, title, act_title, act_section, notice_doc_numbers,
     reg_tree, builder = tree_and_builder(filename, title,
                                          checkpoint, writer_type='XML')
     layer_cache = LayerCacheAggregator()
-    layers = builder.generate_layers(reg_tree, act_title_and_section, layer_cache)
+    layers = builder.generate_layers(reg_tree, act_title_and_section,
+                                     layer_cache)
 
     # Always do at least the first reg
-    logger.info("Version %s", builder.doc_number)
+    logger.info("Version", builder.doc_number)
     builder.write_regulation(reg_tree, layers=layers)
     all_versions = {doc_number: FrozenNode.from_node(reg_tree)}
 
@@ -164,7 +164,7 @@ def generate_xml(filename, title, act_title, act_section, notice_doc_numbers,
                                          layer_cache, notices)
         builder.write_regulation(new_tree, layers=layers)
         builder.write_notice(version, old_tree=old, reg_tree=new_tree,
-                layers=layers)
+                             layers=layers)
         layer_cache.invalidate_by_notice(last_notice)
         layer_cache.replace_using(new_tree)
         del last_notice, old, new_tree, notices     # free some memory

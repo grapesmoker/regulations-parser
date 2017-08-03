@@ -3,7 +3,6 @@
 import os
 import os.path
 import shutil
-import hashlib
 import re
 
 from git import Repo
@@ -17,14 +16,14 @@ import requests
 
 from regparser.tree.struct import Node, NodeEncoder, find
 from regparser.notice.encoder import AmendmentEncoder
-from regparser.tree.xml_parser.reg_text import get_markers
 
-from utils import set_of_random_letters, interpolate_string, ucase_letters
+from utils import interpolate_string
 
 import settings
 import logging
 
 logger = logging.getLogger()
+
 
 class AmendmentNodeEncoder(AmendmentEncoder, NodeEncoder):
     pass
@@ -147,9 +146,10 @@ class XMLWriteContent:
         self.doc_number = doc_number
         self.layers = layers
         self.notices = notices
-        self.notice = next((n  for n in notices
+
+        self.notice = next((n for n in notices
                             if n['document_number'] == doc_number), None)
-        self.appendix_sections = 1 # need to track these manually
+        self.appendix_sections = 1  # need to track these manually
         self.caps = [chr(i) for i in range(65, 65 + 26)]
 
     def write(self, python_object, **kwargs):
@@ -172,13 +172,14 @@ class XMLWriteContent:
 
         xml_tree = self.to_xml(reg_tree)
         xml_string = tostring(xml_tree, pretty_print=True,
-                xml_declaration=True, encoding='UTF-8')
+                              xml_declaration=True, encoding='UTF-8')
 
         with open(full_path, 'w') as f:
             logger.info("Writing regulation to {}".format(full_path))
             f.write(xml_string)
 
-    def write_notice(self, notice, changes={}, reg_tree=None):
+    def write_notice(self, notice, changes={}, reg_tree=None,
+                     left_doc_number=''):
         """ Write a notice. """
         if reg_tree is None:
             raise RuntimeError("to write notices to XML, both a "
@@ -190,9 +191,7 @@ class XMLWriteContent:
             os.makedirs(dir_path)
 
         # Create a notice root element
-        notice_string = '<notice xmlns="eregs" ' \
-                     'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ' \
-                     'xsi:schemaLocation="eregs http://cfpb.github.io/regulations-schema/src/eregs.xsd"></notice>'
+        notice_string = '<notice xmlns="eregs" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="eregs http://cfpb.github.io/regulations-schema/src/eregs.xsd"></notice>'  # noqa
         notice_elm = fromstring(notice_string)
 
         # Get the fdsys and preamble
@@ -211,6 +210,8 @@ class XMLWriteContent:
 
         # Get the changeset
         changeset_elm = Element('changeset')
+        changeset_elm.set('leftDocumentNumber', left_doc_number)
+        changeset_elm.set('rightDocumentNumber', self.doc_number)
         for label, change in changes.items():
             # For each change, generate a change element with the label
             # and operation as attributes.
@@ -228,14 +229,17 @@ class XMLWriteContent:
                 content_elm = self.to_xml(changed_node)
                 change_elm.append(content_elm)
 
+        self.add_analyses(notice_elm)
+
         notice_elm.append(changeset_elm)
 
         xml_string = tostring(notice_elm, pretty_print=True,
-                xml_declaration=True, encoding='UTF-8')
+                              xml_declaration=True, encoding='UTF-8')
 
         # Write the file
         with open(full_path, 'w') as f:
             logger.info("Writing notice to {}".format(full_path))
+            print("Writing notice to {}".format(full_path))
             f.write(xml_string)
 
     def extract_definitions(self):
@@ -264,7 +268,8 @@ class XMLWriteContent:
                 repl_target = repl_text.split(':')[1]
                 a = repl_target.encode('utf-8')
                 b = replacement.encode('utf-8')
-                replacement = '<ref target="{}" reftype="term">'.format(a) + b + '</ref>'
+                replacement = ('<ref target="{}" reftype="term">'.format(a)
+                               + b + '</ref>')
                 replacement_texts.append(replacement)
 
         return replacement_offsets, replacement_texts
@@ -311,9 +316,11 @@ class XMLWriteContent:
             offsets = repl['offsets']
             for offset in offsets:
                 ref_text = text[offset[0]:offset[1]]
-                # we need to form a URL for the external citation based on the citation type
-                # I don't know how to do that yet so the target is just a placeholder
-                target_url = '{}:{}'.format(citation_type, '-'.join(citation))
+                # we need to form a URL for the external citation based
+                # on the citation type I don't know how to do that yet
+                # so the target is just a placeholder
+                target_url = '{}:{}'.format(citation_type,
+                                            '-'.join(citation))
                 replacement_text = '<ref target="{}" reftype="external">'.format(target_url) + \
                                    ref_text.encode('utf-8') + '</ref>'
                 replacement_texts.append(replacement_text)
@@ -325,9 +332,8 @@ class XMLWriteContent:
     def apply_definitions(text, replacement):
         offset = replacement['offset']
         term = replacement['term']
-        hash_value = hashlib.sha1(term).hexdigest()
         replacement_text = text[offset[0]:offset[1]]
-        replacement_text = '<def term="{}" id="{}">'.format(term, hash_value) + \
+        replacement_text = '<def term="{}">'.format(term) + \
                            replacement_text.encode('utf-8') + '</def>'
 
         return [offset], [replacement_text]
@@ -355,19 +361,24 @@ class XMLWriteContent:
 
     @staticmethod
     def apply_keyterms(text, replacements):
-        pass
+        """ Remove keyterm text from the text. It will need to be put in
+            the title at some other point in processing."""
+        # The keyterm belongs in the title of the element not the body.
+        # Remove it.
+        keyterm = replacements[0]['key_term']
+        if keyterm in text:
+            offset = (text.index(keyterm), text.index(keyterm) + len(keyterm))
+            return [offset], ['']
+        return [], []
 
     @staticmethod
     def apply_formatting(replacements):
-        # format_elements = []
         replacement_texts = []
         replacement_offsets = []
         for repl in replacements:
             if 'dash_data' in repl:
                 text = '<dash>' + repl['dash_data']['text'] + '</dash>'
-                offset = repl['locations'][0]
-                replacement_offsets.append([offset, offset + len(text)])
-                replacement_texts.append(text)
+
             elif 'table_data' in repl:
                 text = '<table><header>'
                 table_data = repl['table_data']
@@ -376,9 +387,10 @@ class XMLWriteContent:
                     for header_row in header:
                         text += '<columnHeaderRow>'
                         for col in header_row:
-                            text += '<column colspan="{}" rowspan="{}">'.format(col['colspan'], col['rowspan'])
-                            text += col['text'] + '</column>'
-                        text += '</columnHeaderRow>'
+                            text += (
+                                '<column colspan="{}" rowspan="{}">'.format(
+                                    col['colspan'], col['rowspan'])
+                                + col['text'] + '</column></columnHeaderRow>')
                 text += '</header>'
                 rows = table_data['rows']
                 for row in rows:
@@ -388,9 +400,22 @@ class XMLWriteContent:
                     text += '</row>'
                 text += '</table>'
 
-                offset = repl['locations'][0]
-                replacement_offsets.append([offset, offset + len(text)])
-                replacement_texts.append(text)
+            elif 'subscript_data' in repl:
+                text = ('<variable>'
+                        '{variable}<subscript>{subscript}</subscript>'
+                        '</variable>'.format(
+                            variable=repl['subscript_data']['variable'],
+                            subscript=repl['subscript_data']['subscript']))
+
+            elif 'fence_data' in repl:
+                lines = '\n'.join(['<line>{}</line>'.format(l)
+                                   for l in repl['fence_data']['lines']])
+                text = '<callout type="{}">{}</callout>'.format(
+                    repl['fence_data']['type'], lines)
+
+            offset = repl['locations'][0]
+            replacement_offsets.append([offset, offset + len(text)])
+            replacement_texts.append(text)
 
         return replacement_offsets, replacement_texts
 
@@ -416,8 +441,8 @@ class XMLWriteContent:
 
             # Add the text to the offset plus the footnote to
             # the annotated string.
-            annotated_text += text[position:ref_offset] + \
-                    tostring(footnote_elm)
+            annotated_text += (text[position:ref_offset]
+                               + tostring(footnote_elm, encoding='UTF-8'))
 
             # Advance our position
             position = ref_offset
@@ -432,9 +457,9 @@ class XMLWriteContent:
 
         # Each analysis section will be need to be constructed the
         # same way. So here's a recursive function to do it.
-        def analysis_section(notice, parent_elm, child):
+        def analysis_section(notice, child):
             # Create the section element
-            section_elm = SubElement(parent_elm, 'analysisSection')
+            section_elm = Element('analysisSection')
 
             # Add the title element
             title_elm = SubElement(section_elm, 'title')
@@ -443,15 +468,16 @@ class XMLWriteContent:
             # Add paragraphs
             for paragraph in child['paragraphs']:
                 paragraph_number = child['paragraphs'].index(paragraph)
-                paragraph_footnotes = [fn
-                        for fn in child['footnote_refs']
-                            if fn['paragraph'] == paragraph_number]
+
+                paragraph_footnotes = [
+                    fn for fn in child['footnote_refs']
+                    if fn['paragraph'] == paragraph_number]
                 text = self.resolve_footnotes(notice, paragraph,
                                               paragraph_footnotes)
                 paragraph_elm = fromstring(
-                        '<analysisParagraph>'
-                            + text +
-                        '</analysisParagraph>')
+                    '<analysisParagraph>'
+                    + text +
+                    '</analysisParagraph>')
 
                 # Make sure to strip out elements that don't belong
                 strip_tags(paragraph_elm, 'EM')
@@ -459,52 +485,62 @@ class XMLWriteContent:
                 section_elm.append(paragraph_elm)
 
             # Construct an analysis section for any children.
-            map(lambda c:  analysis_section(notice, section_elm, c),
+            try:
+                map(lambda c:  section_elm.append(analysis_section(notice, c)),
                     child['children'])
+            except:
+                print("Failed to write analysis for", child['title'])
+                pass
+
+            return section_elm
 
         # NOTE: We'll let index errors percolate upwards because if
         # the index doesn't exist, and we can't find the notice
         # number or analysis within the notice, there's something
         # wrong with the analyses layer to this point.
-        analysis_version = analysis_ref['reference'][0]
-        analysis_label = analysis_ref['reference'][1]
+        analysis_doc_number = analysis_ref['reference'][0]
+        analysis_target = analysis_ref['reference'][1]
+        analysis_date = analysis_ref['publication_date']
 
         # Look up the notice with the analysis attached
         analysis_notice = [n for n in self.notices
-                    if n['document_number'] == analysis_version][0]
+                           if n['document_number'] == analysis_doc_number][0]
 
         # Lookup the analysis for this element
-        analysis = [a
-                for a in analysis_notice['section_by_section']
-                    if analysis_label in a['labels']][0]
+        def lookup_analysis(node, label):
+            # If the node has no labels and has children, dig into them
+            # instead.
+            if 'labels' in node.keys() and label in node['labels']:
+                return node
+            for child in node['children']:
+                match = lookup_analysis(child, label)
+                if match is not None:
+                    return match
+
+        analysis = next(a for a in
+                        (lookup_analysis(a, analysis_target)
+                         for a in analysis_notice['section_by_section'])
+                        if a is not None)
 
         # Construct the analysis element and its sections
-        analysis_elm = Element('analysis')
-        analysis_section(analysis_notice, analysis_elm, analysis)
+        analysis_section_elm = analysis_section(analysis_notice, analysis)
+        analysis_section_elm.set('target', analysis_target)
+        analysis_section_elm.set('notice', analysis_doc_number)
+        analysis_section_elm.set('date', analysis_date)
 
-        return analysis_elm
+        return analysis_section_elm
 
     def add_analyses(self, elm):
         """
-        This method is not like the others above.
-
-        Anlayses are added to the end of the element they analyze. Given
-        an element, if analysis exists in the analyses layer for that
-        label, an analysis element will be created and appended to the
-        given element.
+        Anlayses are added to the end of the regulation or notice.
         """
 
-        # If there's no analysis for this label, move on.
-        label = elm.get('label')
-        if label not in self.layers['analyses']:
-            return
+        analysis_elm = SubElement(elm, 'analysis')
 
-        # The analyses for this label.
-        analyses = self.layers['analyses'][label]
-
-        for analysis_ref in analyses:
-            analysis_elm = self.build_analysis(analysis_ref)
-            elm.append(analysis_elm)
+        for label, analyses in self.layers['analyses'].items():
+            for analysis_ref in analyses:
+                analysis_section_elm = self.build_analysis(analysis_ref)
+                analysis_elm.append(analysis_section_elm)
 
     def fdsys(self, reg_number, date='2012-01-01', orig_date='2012-01-01'):
         meta = self.layers['meta'][reg_number][0]
@@ -551,13 +587,17 @@ class XMLWriteContent:
             title = item['title']
             target = '-'.join(index)
             if index[-1].isdigit() and not index[1].isalpha():
-                toc_section = SubElement(toc_elem, 'tocSecEntry', target=target)
+                toc_section = SubElement(toc_elem,
+                                         'tocSecEntry',
+                                         target=target)
                 toc_secnum = SubElement(toc_section, 'sectionNum')
                 toc_secnum.text = str(index[-1])
                 toc_secsubj = SubElement(toc_section, 'sectionSubject')
                 toc_secsubj.text = title
             else:
-                toc_appentry = SubElement(toc_elem, 'tocAppEntry', target=target)
+                toc_appentry = SubElement(toc_elem,
+                                          'tocAppEntry',
+                                          target=target)
                 toc_appletter = SubElement(toc_appentry, 'appendixLetter')
                 toc_appsubj = SubElement(toc_appentry, 'appendixSubject')
                 toc_appletter.text = index[-1]
@@ -568,40 +608,43 @@ class XMLWriteContent:
     def is_interp_appendix(node):
         caps = [chr(i) for i in range(65, 65 + 26)]
         if node.node_type == 'interp' and \
-            node.label[1] in caps:
+                node.label[1] in caps:
             pass
 
     def to_xml(self, root):
-        process_content = False
-
         if 'Subpart' in root.label:
-            elem = Element('subpart')
+            elem = Element('subpart', label=root.label_id())
             if root.node_type != "emptypart":
                 title = SubElement(elem, 'title')
                 title.text = root.title
             if len(root.label) == 3:
                 elem.set('subpartLetter', root.label[-1])
-            toc = XMLWriteContent.toc_to_xml(self.layers['toc'][root.label_id()])
+            toc = XMLWriteContent.toc_to_xml(
+                self.layers['toc'][root.label_id()])
+            toc.set('label', root.label_id() + '-TOC')
             elem.append(toc)
             content = SubElement(elem, 'content')
             for child in root.children:
                 sub_elem = self.to_xml(child)
                 content.append(sub_elem)
+
         elif root.label[-1].isdigit() and len(root.label) == 2:
-            elem = Element('section', sectionNum=root.label[-1], label=root.label_id())
+            elem = Element('section',
+                           sectionNum=root.label[-1],
+                           label=root.label_id())
             subject = SubElement(elem, 'subject')
             subject.text = root.title
             if root.text.strip() != '' and len(root.children) == 0:
                 label = root.label_id() + '-p1'
-                paragraph = SubElement(elem, 'paragraph', marker='', label=label)
+                paragraph = SubElement(elem,
+                                       'paragraph',
+                                       marker='',
+                                       label=label)
                 par_content = SubElement(paragraph, 'content')
                 par_content.text = root.text.strip()
-            elif '[Reserved]' in root.title:
-                reserved = SubElement(elem, 'reserved')
+
         elif len(root.label) == 1:
-            reg_string = '<regulation xmlns="eregs" ' \
-                         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ' \
-                         'xsi:schemaLocation="eregs http://cfpb.github.io/regulations-schema/src/eregs.xsd"></regulation>'
+            reg_string = '<regulation xmlns="eregs" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="eregs http://cfpb.github.io/regulations-schema/src/eregs.xsd"></regulation>'  # noqa
             elem = fromstring(reg_string)
             title = root.title
             fdsys = self.fdsys(root.label_id())
@@ -616,73 +659,145 @@ class XMLWriteContent:
             for child in root.children:
                 sub_elem = self.to_xml(child)
                 content.append(sub_elem)
+
+            # Add any analysis that might exist for this version
+            try:
+                self.add_analyses(elem)
+            except Exception:
+                print 'Could not create analyses for {}'.format(root.label)
+
         elif root.node_type == 'appendix' and len(root.label) == 2:
             # reset the section counter
             self.appendix_sections = 1
-            elem = Element('appendix', label=root.label_id(), appendixLetter=root.label[-1])
+            elem = Element('appendix',
+                           label=root.label_id(),
+                           appendixLetter=root.label[-1])
             title = SubElement(elem, 'appendixTitle')
             title.text = root.title
             if root.label_id() in self.layers['toc']:
-                toc = XMLWriteContent.toc_to_xml(self.layers['toc'][root.label_id()])
+                toc = XMLWriteContent.toc_to_xml(
+                    self.layers['toc'][root.label_id()])
                 elem.append(toc)
-            if '[Reserved]' in root.title:
-                reserved = SubElement(elem, 'reserved')
+
         elif root.node_type == 'appendix' and len(root.label) == 3:
-            elem = Element('appendixSection', appendixSecNum=str(self.appendix_sections),
+            elem = Element('appendixSection',
+                           appendixSecNum=str(self.appendix_sections),
                            label=root.label_id())
             subject = SubElement(elem, 'subject')
             subject.text = root.title
             self.appendix_sections += 1
             if root.text.strip() != '' and len(root.children) == 0:
                 label = root.label_id() + '-p1'
-                paragraph = SubElement(elem, 'paragraph', marker='', label=label)
+                paragraph = SubElement(elem,
+                                       'paragraph',
+                                       marker='',
+                                       label=label)
                 par_content = SubElement(paragraph, 'content')
                 par_content.text = root.text.strip()
+
         elif root.node_type == 'interp' and len(root.label) == 2:
             elem = Element('interpretations', label=root.label_id())
             title = SubElement(elem, 'title')
             title.text = root.title
-        elif root.node_type == 'interp'and root.label[1] in self.caps and len(root.label) <= 3:
-            # import pdb; pdb.set_trace()
-            elem = Element('interpAppendix', appendixLetter=root.label[1], label=root.label_id())
+
+        elif root.node_type == 'interp' and \
+                root.label[1] in self.caps and \
+                len(root.label) <= 3:
+            elem = Element('interpSection', label=root.label_id())
             title = SubElement(elem, 'title')
             title.text = root.title
+
+            # Look through the interpretations layer to see if this
+            # label is the reference for any other. That other label is
+            # our target.
+            target = None
+            for interp_target, references in \
+                    self.layers['interpretations'].items():
+                if root.label_id() in [r['reference'] for r in references]:
+                    target = interp_target
+                    break
+            if target is not None:
+                elem.set('target', target)
+
         elif root.node_type == 'interp' and len(root.label) == 3 and \
                 (root.label[1].isdigit() or root.label[1] == 'Interp'):
             if root.label[1].isdigit():
-                elem = Element('interpSection', sectionNum=str(root.label[1]), label=root.label_id())
+                elem = Element('interpSection',
+                               sectionNum=str(root.label[1]),
+                               label=root.label_id())
             else:
                 elem = Element('interpSection', label=root.label_id())
             title = SubElement(elem, 'title')
             title.text = root.title
-            if root.title is not None and '[Reserved]' in root.title:
-                reserved = SubElement(elem, 'reserved')
-        elif root.node_type == 'interp' and len(root.label) >= 3 and root.label[-1] == 'Interp'\
+
+            # Look through the interpretations layer to see if this
+            # label is the reference for any other. That other label is
+            # our target.
+            target = None
+            for interp_target, references in \
+                    self.layers['interpretations'].items():
+                if root.label_id() in [r['reference'] for r in references]:
+                    target = interp_target
+                    break
+            if target is not None:
+                elem.set('target', target)
+
+        elif root.node_type == 'interp' and \
+                len(root.label) >= 3 and \
+                root.label[-1] == 'Interp' \
                 and root.label[1] in self.caps:
             # this is the case for hyphenated appendices like MS-1 in reg X
-            elem = Element('interpAppSection', appendixLetter=root.label[1], label=root.label_id())
+            elem = Element('interpParagraph', label=root.label_id())
             title = SubElement(elem, 'title')
             title.text = root.title
-        elif root.node_type == 'interp': # and \
-                #((len(root.label) > 3 and root.label[-1] != 'Interp') or \
-                # (len(root.label) == 3 and root.label[1] == 'Interp')):
-            # fall-through for all other interp nodes, which should be paragraphs
-            target = [item for item in root.label if item != 'Interp']
-            target = '-'.join(target)
-            label = root.label_id()
-            try:
-                marker_item = self.layers['paragraph-markers'][root.label_id()]
-                marker = marker_item[0]['text']
-            except:
-                marker = root.label[-1]
+            content = SubElement(elem, 'content')
 
-            elem = Element('interpParagraph', label=label, target=target, marker=marker)
+        elif root.node_type == 'interp':
+            # fall-through for all other interp nodes, which should be
+            # paragraphs
+            label = root.label_id()
+            elem = Element('interpParagraph', label=label)
+
+            # Look through the interpretations layer to see if this
+            # label is the reference for any other. That other label is
+            # our target.
+            target = None
+            for interp_target, references in \
+                    self.layers['interpretations'].items():
+                if root.label_id() in [r['reference'] for r in references]:
+                    target = interp_target
+                    break
+            if target is not None:
+                elem.set('target', target)
+
+            # Get the text
+            text = root.text
+            text = self.apply_layers(text, root.label_id())
+            if text.startswith('!'):
+                text = ''
+
+            # If there's a title or a keyterm, add it to the element
+
             if root.title:
                 title = SubElement(elem, 'title')
                 title.text = root.title
-            text = self.apply_layers(root)
-            if text.startswith('!'):
-                text = ''
+            elif root.label_id() in self.layers['keyterms']:
+                # keyterm is not an inline layer
+                keyterms_layer = self.layers['keyterms']
+                keyterm = keyterms_layer[root.label_id()][0]['key_term']
+                title = SubElement(elem, 'title', attrib={'type': 'keyterm'})
+                title.text = keyterm
+
+            # If this paragraph has a marker in the markers layer, add
+            # it to the element
+            try:
+                markers_layer = self.layers['paragraph-markers']
+                marker_item = markers_layer[root.label_id()]
+                marker = marker_item[0]['text']
+                elem.set('marker', marker)
+            except KeyError:
+                pass
+
             try:
                 content = fromstring('<content>' + text + '</content>')
             except XMLSyntaxError:
@@ -690,10 +805,12 @@ class XMLWriteContent:
 
             # graphics are special since they're not really inlined
             if root.label_id() in self.layers['graphics']:
-                graphics = XMLWriteContent.apply_graphics(self.layers['graphics'][root.label_id()])
+                graphics = XMLWriteContent.apply_graphics(
+                    self.layers['graphics'][root.label_id()])
                 for graphic in graphics:
                     content.append(graphic)
             elem.append(content)
+
         else:
             try:
                 marker_item = self.layers['paragraph-markers'][root.label_id()]
@@ -707,10 +824,12 @@ class XMLWriteContent:
             else:
                 if root.label_id() in self.layers['keyterms']:
                     # keyterm is not an inline layer
-                    keyterm = self.layers['keyterms'][root.label_id()][0]['key_term']
-                    title = SubElement(elem, 'title', attrib={'type': 'keyterm'})
+                    keyterms_layer = self.layers['keyterms']
+                    keyterm = keyterms_layer[root.label_id()][0]['key_term']
+                    title = SubElement(elem, 'title',
+                                       attrib={'type': 'keyterm'})
                     title.text = keyterm
-            text = self.apply_layers(root)
+            text = self.apply_layers(root.text, root.label_id())
             if text.startswith('!'):
                 text = ''
             try:
@@ -720,7 +839,8 @@ class XMLWriteContent:
 
             # graphics are special since they're not really inlined
             if root.label_id() in self.layers['graphics']:
-                graphics = XMLWriteContent.apply_graphics(self.layers['graphics'][root.label_id()])
+                graphics = XMLWriteContent.apply_graphics(
+                    self.layers['graphics'][root.label_id()])
                 for graphic in graphics:
                     content.append(graphic)
             elem.append(content)
@@ -731,40 +851,39 @@ class XMLWriteContent:
                 sub_elem = self.to_xml(child)
                 elem.append(sub_elem)
 
-            # Add any analysis that might exist for this node
-            try:
-                self.add_analyses(elem)
-            except Exception as ex:
-                print 'Could not create analyses for {}'.format(root.label)
 
         return elem
 
-    def apply_layers(self, node):
-        text = node.text
-        replacement_hashes = {}
+    def apply_layers(self, text, label_id):
         all_offsets = []
         all_replacements = []
-        # import pdb; pdb.set_trace()
-        # print self.layers.items()
-        # print node.label_id()
         for ident, layer in self.layers.items():
-            if node.label_id() in layer:
-                # print 'applying layers'
-                replacements = layer[node.label_id()]
+            if label_id in layer:
+                replacements = layer[label_id]
                 if ident == 'terms':
-                    offsets, repls = XMLWriteContent.apply_terms(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_terms(
+                        text, replacements)
                 elif ident == 'paragraph-markers':
-                    offsets, repls = XMLWriteContent.apply_paragraph_markers(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_paragraph_markers(
+                        text, replacements)
                 elif ident == 'internal-citations':
-                    offsets, repls = XMLWriteContent.apply_internal_citations(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_internal_citations(
+                        text, replacements)
                 elif ident == 'definitions':
-                    offsets, repls = XMLWriteContent.apply_definitions(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_definitions(
+                        text, replacements)
                 elif ident == 'external-citations':
-                    offsets, repls = XMLWriteContent.apply_external_citations(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_external_citations(
+                        text, replacements)
                 elif ident == 'formatting':
-                    offsets, repls = XMLWriteContent.apply_formatting(replacements)
-                #elif ident == 'graphics':
-                #    offsets, repls = XMLWriteContent.apply_graphics(text, replacements)
+                    offsets, repls = XMLWriteContent.apply_formatting(
+                        replacements)
+                elif ident == 'keyterms':
+                    offsets, repls = XMLWriteContent.apply_keyterms(
+                        text, replacements)
+                # elif ident == 'graphics':
+                #     offsets, repls = XMLWriteContent.apply_graphics(
+                #         text, replacements)
                 else:
                     offsets = []
                     repls = []
@@ -774,14 +893,17 @@ class XMLWriteContent:
 
         if len(all_offsets) > 0 and len(all_replacements) > 0:
             offsets_and_repls = zip(all_offsets, all_replacements)
-            offsets_and_repls = sorted(offsets_and_repls, key=lambda x: x[0][0])
+            offsets_and_repls = sorted(offsets_and_repls,
+                                       key=lambda x: x[0][0])
             all_offsets, all_replacements = zip(*offsets_and_repls)
 
             # remove the table text
             if re.search('\|*\|', text):
                 text = ''
 
-            text = interpolate_string(text, all_offsets, all_replacements).strip()
+            text = interpolate_string(text,
+                                      all_offsets,
+                                      all_replacements).strip()
 
         return text
 
@@ -810,8 +932,9 @@ class Client:
                 raise ValueError('Unknown writer type specified!')
 
     def regulation(self, label, doc_number, layers=[], notices={}):
-        return self.writer_class("regulation/{}/{}".format(label,
-            doc_number), doc_number, layers=layers, notices=notices)
+        return self.writer_class(
+            "regulation/{}/{}".format(label, doc_number), doc_number,
+            layers=layers, notices=notices)
 
     def layer(self, layer_name, label, doc_number):
         return self.writer_class(
@@ -819,8 +942,9 @@ class Client:
             doc_number)
 
     def notice(self, label, doc_number, layers=None, notices={}):
-        return self.writer_class("notice/{}/{}.xml".format(label,
-            doc_number), doc_number, layers=layers, notices=notices)
+        return self.writer_class(
+            "notice/{}/{}".format(label, doc_number), doc_number,
+            layers=layers, notices=notices)
 
     def diff(self, label, old_version, new_version):
         return self.writer_class(

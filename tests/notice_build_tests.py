@@ -141,8 +141,8 @@ class NoticeBuildTest(TestCase):
                 <P>Following Content</P>
             </SUPLINF>
         </ROOT>"""
-        notice = {'cfr_parts': ['9292'], 'cfr_part': '9292', 
-                  'meta': {'start_page': 100}, 
+        notice = {'cfr_parts': ['9292'], 'cfr_part': '9292',
+                  'meta': {'start_page': 100},
                   'document_number': '1999-12345'}
         self.assertEqual(build.process_xml(notice, etree.fromstring(xml)), {
             'cfr_parts': ['9292'],
@@ -177,7 +177,7 @@ class NoticeBuildTest(TestCase):
                 <P>Following Content</P>
             </SUPLINF>
         </ROOT>"""
-        notice = {'cfr_parts': ['9292'], 'cfr_part': '9292', 
+        notice = {'cfr_parts': ['9292'], 'cfr_part': '9292',
                   'meta': {'start_page': 210},
                   'document_number': '1999-12345'}
         self.assertEqual(build.process_xml(notice, etree.fromstring(xml)), {
@@ -205,7 +205,7 @@ class NoticeBuildTest(TestCase):
         </ROOT>"""
         xml = etree.fromstring(xml)
 
-        notice = {'cfr_parts': ['902'], 'cfr_part': '902', 
+        notice = {'cfr_parts': ['902'], 'cfr_part': '902',
                   'meta': {'start_page': 10},
                   'document_number': '1999-12345',
                   'effective_on': '2002-02-02'}
@@ -219,7 +219,7 @@ class NoticeBuildTest(TestCase):
         # Uses the date found in the XML
         self.assertEqual('2002-01-01', notice['effective_on'])
 
-        notice = {'cfr_parts': ['902'], 'cfr_part': '902', 
+        notice = {'cfr_parts': ['902'], 'cfr_part': '902',
                   'meta': {'start_page': 10},
                   'document_number': '1999-12345', 'effective_on': None}
         notice = build.process_xml(notice, xml)
@@ -493,9 +493,9 @@ class NoticeBuildTest(TestCase):
         notice = {'cfr_parts': ['105', '106'], 'cfr_part': '105'}
         build.process_amendments(notice, notice_xml)
 
-        self.assertEqual(2, len(notice['changes']))
+        self.assertEqual(1, len(notice['changes']))
         self.assertTrue('105-1-a' in notice['changes'])
-        self.assertTrue('106-3-b' in notice['changes'])
+        self.assertTrue('106-3-b' not in notice['changes'])
 
     def test_process_amendments_context(self):
         """Context should carry over between REGTEXTs"""
